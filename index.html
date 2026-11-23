@@ -129,6 +129,18 @@ add("web", "Geolokatsiya", false, async () => {
 }, "Natijadagi 'ruxsat holati' sababni ko'rsatadi: denied = so'rovsiz rad etilgan, prompt = so'rov chiqishi kerak edi.");
 add("web", "Brauzer bildirishnomasi (Notification API)", false, async () => { need("Notification" in window, "API yo'q"); const p = await Notification.requestPermission(); need(p === "granted", "ruxsat: " + p); new Notification("API Test", { body: "Brauzer bildirishnomasi" }); return "ko'rsatildi"; });
 add("web", "Brauzer to'liq ekrani (requestFullscreen)", false, async () => { await document.documentElement.requestFullscreen(); await wait(800); await document.exitFullscreen(); return "kirdi va chiqdi"; });
+add("web", "alert() oynasi ko'rinadi", false, async () => {
+  alert("Bu alert() oynasi. OK ni bosing."); return "Oyna chiqqan bo'lishi kerak edi. CHIQMAGAN bo'lsa, dastur alert() ni buzgan: bu XATO";
+}, "Oyna chiqsa, OK ni bosing.");
+add("web", "confirm() haqiqiy qiymat qaytaradi", false, async () => {
+  const r = confirm("Test: «Bekor qilish» (Cancel) tugmasini bosing.");
+  need(typeof r === "boolean", "confirm() " + typeof r + " qaytardi (Promise bo'lsa, dastur uni buzgan va «O'chirilsinmi?» so'rovlari so'ramasdan o'tib ketadi)");
+  need(r === false, "Bekor qilish bosildi, lekin natija true");
+  return "Bekor qilish -> false: to'g'ri";
+}, "Chiqqan oynada «Bekor qilish» ni bosing.");
+add("web", "prompt() oynasi", false, async () => {
+  const r = prompt("Test: 'salom' deb yozing va OK ni bosing"); need(r === "salom", "kutilgan 'salom', keldi: " + JSON.stringify(r)); return "matn qaytdi: to'g'ri";
+}, "Oynaga salom deb yozing.");
 add("web", "window.open: tashqi havola", false, async () => { window.open("https://example.com", "_blank"); return "Havola TIZIM BRAUZERIDA ochilishi kerak (dastur ichida yangi oyna emas): ko'zda tekshiring"; });
 add("web", "window.open: file: havola bloklanadi", false, async () => { window.open("file:///C:/Windows/", "_blank"); return "Hech narsa ochilmasligi kerak (Explorer ham): ko'zda tekshiring"; });
 
