@@ -115,7 +115,18 @@ add("web", "Service Worker qo'llab-quvvatlanishi", true, async () => { need("ser
 add("web", "Xavfsiz muhit (secure context)", true, async () => { need(window.isSecureContext, "xavfsiz muhit emas"); return "origin: " + location.origin; });
 add("web", "Kamera (getUserMedia video)", false, async () => { const s = await navigator.mediaDevices.getUserMedia({ video: true }); s.getTracks().forEach((t) => t.stop()); return "kamera ochildi"; }, "Kamera ulangan bo'lishi kerak.");
 add("web", "Mikrofon (getUserMedia audio)", false, async () => { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); return "mikrofon ochildi"; }, "Mikrofon ulangan bo'lishi kerak.");
-add("web", "Geolokatsiya", false, () => new Promise((res, rej) => navigator.geolocation.getCurrentPosition((p) => res("koordinata: " + p.coords.latitude.toFixed(2) + ", " + p.coords.longitude.toFixed(2)), (e) => rej(new Error(e.message)), { timeout: 8000 })));
+add("web", "Geolokatsiya", false, async () => {
+  // Diagnostika: ruxsat holati oldin va keyin, xato kodi
+  const state = async () => { try { return (await navigator.permissions.query({ name: "geolocation" })).state; } catch (e) { return "noma'lum"; } };
+  const before = await state();
+  return new Promise((res, rej) => navigator.geolocation.getCurrentPosition(
+    (p) => res("koordinata: " + p.coords.latitude.toFixed(2) + ", " + p.coords.longitude.toFixed(2) + " (ruxsat holati oldin: " + before + ")"),
+    async (e) => {
+      const names = { 1: "RUXSAT RAD ETILDI", 2: "JOYLASHUV MAVJUD EMAS", 3: "VAQT TUGADI" };
+      rej(new Error("kod " + e.code + " (" + (names[e.code] || "?") + "); xabar: " + e.message + "; ruxsat holati oldin: " + before + ", keyin: " + (await state())));
+    },
+    { timeout: 10000 }));
+}, "Natijadagi 'ruxsat holati' sababni ko'rsatadi: denied = so'rovsiz rad etilgan, prompt = so'rov chiqishi kerak edi.");
 add("web", "Brauzer bildirishnomasi (Notification API)", false, async () => { need("Notification" in window, "API yo'q"); const p = await Notification.requestPermission(); need(p === "granted", "ruxsat: " + p); new Notification("API Test", { body: "Brauzer bildirishnomasi" }); return "ko'rsatildi"; });
 add("web", "Brauzer to'liq ekrani (requestFullscreen)", false, async () => { await document.documentElement.requestFullscreen(); await wait(800); await document.exitFullscreen(); return "kirdi va chiqdi"; });
 add("web", "window.open: tashqi havola", false, async () => { window.open("https://example.com", "_blank"); return "Havola TIZIM BRAUZERIDA ochilishi kerak (dastur ichida yangi oyna emas): ko'zda tekshiring"; });
