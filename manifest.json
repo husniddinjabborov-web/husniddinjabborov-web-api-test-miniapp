@@ -1,0 +1,16 @@
+{
+  "id": "com.test.apitest",
+  "name": "API Test",
+  "version": "1.0.0",
+  "description": "Dastur imkoniyatlarini bosqichma-bosqich sinash",
+  "category": "Vositalar",
+  "permissions": [
+    "system.info",
+    "notifications",
+    "clipboard.write",
+    "clipboard.read",
+    "files.read",
+    "files.write",
+    "links.open"
+  ]
+}

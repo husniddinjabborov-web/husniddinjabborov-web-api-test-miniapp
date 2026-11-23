@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Test</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f6f6f3; --card:#fff; --text:#1a1a1a; --muted:#6b7280; --line:#e5e7eb; --ok:#15803d; --bad:#b91c1c; --man:#b45309; --acc:#2540ff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14151a; --card:#1d1f26; --text:#eceef3; --muted:#9aa1b2; --line:#2c2f3a; --ok:#4ade80; --bad:#f87171; --man:#fbbf24; --acc:#7c8cff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; background:var(--bg); color:var(--text); font:14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  h1 { margin:0 0 4px; font-size:22px; }
+  p.sub { margin:0 0 12px; color:var(--muted); }
+  .top { position:sticky; top:0; z-index:5; background:var(--bg); padding:8px 0 10px; border-bottom:1px solid var(--line); margin-bottom:8px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button { font:inherit; font-weight:600; padding:7px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; }
+  button.primary { background:var(--acc); color:#fff; border-color:var(--acc); }
+  button.small { padding:3px 9px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:default; }
+  label.chk { display:inline-flex; gap:6px; align-items:center; color:var(--muted); cursor:pointer; }
+  .summary { margin-left:auto; color:var(--muted); font-weight:700; }
+  .perm { margin-top:8px; font-size:12.5px; color:var(--muted); }
+  .perm b { color:var(--text); }
+  .gh { display:flex; align-items:center; gap:10px; margin:22px 0 8px; }
+  .gh h2 { font-size:15px; margin:0; }
+  .gh .gs { color:var(--muted); font-size:12.5px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .row { display:grid; grid-template-columns: 28px 1fr auto; gap:10px; padding:9px 14px; border-top:1px solid var(--line); align-items:start; }
+  .row:first-child { border-top:0; }
+  .icon { font-weight:800; text-align:center; }
+  .s-ok .icon { color:var(--ok); } .s-bad .icon { color:var(--bad); } .s-man .icon, .s-run .icon { color:var(--man); } .s-wait .icon, .s-skip .icon { color:var(--muted); }
+  .name { font-weight:600; }
+  .detail { color:var(--muted); font-size:12.5px; word-break:break-word; white-space:pre-wrap; }
+  .s-bad .detail { color:var(--bad); }
+  .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:6px; padding:1px 6px; margin-left:6px; font-weight:500; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<h1>API Test: to'liq tekshiruv</h1>
+<p class="sub">Bitta faylda hamma narsa: veb imkoniyatlar, Host API (barcha metodlar va xato holatlari), xavfsizlik, fayl serveri va dasturning qo'lda tekshiruv ro'yxati.</p>
+
+<div class="top">
+  <div class="bar">
+    <button class="primary" id="runAuto">Hamma avtomatik testlar</button>
+    <button id="copy">Natijani nusxalash</button>
+    <button id="reset">Tozalash</button>
+    <label class="chk"><input type="checkbox" id="onlyBad"> Faqat muammolar</label>
+    <span class="summary" id="summary"></span>
+  </div>
+  <div class="perm" id="perm">Ruxsatlar tekshirilmoqda...</div>
+</div>
+
+<div id="groups"></div>
+
+<script>
+"use strict";
+const T = [];
+const GROUPS = [];
+const group = (id, title, hint) => GROUPS.push({ id, title, hint });
+const add = (g, name, auto, run, hint) => T.push({ g, name, auto, run, hint, status: "wait", detail: "" });
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const need = (cond, msg) => { if (!cond) throw new Error(msg); };
+class Skip extends Error {}
+const skip = (m) => { throw new Skip(m); };
+const big = (bytes) => "x".repeat(bytes);
+
+async function needPerm(name) { if (!(await miniapp.hasPermission(name))) skip("«" + name + "» ruxsati berilmagan: o'tkazib yuborildi"); }
+
+// Xato kodini kutadi. katta so'rovlarda server ulanishni uzishi mumkin: bunda ham o'tgan hisoblanadi.
+async function expectErr(method, params, code, tolerateReset) {
+  let r;
+  try { r = await miniapp.call(method, params); }
+  catch (e) { if (tolerateReset) return "ulanish uzildi (server katta so'rovni rad etdi): to'g'ri"; throw e; }
+  need(!r.ok, "xato kutilgan edi (" + code + "), lekin muvaffaqiyatli bo'ldi");
+  need(r.error.code === code, "kutilgan " + code + ", keldi " + r.error.code + ": " + r.error.message);
+  return code + " qaytdi: to'g'ri";
+}
+async function rawHost(path, opts) { return fetch("/__host/" + path, opts); }
+
+// ===================== A. VEB IMKONIYATLARI =====================
+group("web", "A. Veb imkoniyatlari (brauzer dvigateli)");
+
+add("web", "localStorage", true, async () => { localStorage.setItem("t", "1"); need(localStorage.getItem("t") === "1", "o'qib bo'lmadi"); localStorage.removeItem("t"); return "yozish va o'qish ishladi"; });
+add("web", "IndexedDB", true, () => new Promise((res, rej) => {
+  const open = indexedDB.open("apitest", 1);
+  open.onupgradeneeded = () => open.result.createObjectStore("s");
+  open.onerror = () => rej(open.error);
+  open.onsuccess = () => {
+    const db = open.result, tx = db.transaction("s", "readwrite");
+    tx.objectStore("s").put("salom", "k");
+    tx.oncomplete = () => { const g = db.transaction("s").objectStore("s").get("k"); g.onsuccess = () => { db.close(); g.result === "salom" ? res("yozish va o'qish ishladi") : rej(new Error("qiymat mos kelmadi")); }; };
+    tx.onerror = () => rej(tx.error);
+  };
+}));
+add("web", "Web Worker", true, () => new Promise((res, rej) => {
+  const w = new Worker(URL.createObjectURL(new Blob(["onmessage = e => postMessage(e.data * 2)"])));
+  const t = setTimeout(() => rej(new Error("javob kelmadi")), 3000);
+  w.onmessage = (e) => { clearTimeout(t); w.terminate(); e.data === 42 ? res("21 * 2 = 42") : rej(new Error("noto'g'ri natija")); };
+  w.onerror = (e) => { clearTimeout(t); rej(new Error(e.message || "worker xatosi")); };
+  w.postMessage(21);
+}));
+add("web", "WebAssembly", true, async () => {
+  const bytes = new Uint8Array([0,97,115,109,1,0,0,0,1,7,1,96,2,127,127,1,127,3,2,1,0,7,7,1,3,97,100,100,0,0,10,9,1,7,0,32,0,32,1,106,11]);
+  const { instance } = await WebAssembly.instantiate(bytes); need(instance.exports.add(2, 3) === 5, "hisob noto'g'ri"); return "wasm modul ishladi: 2 + 3 = 5";
+});
+add("web", "fetch (internet)", true, async () => { const r = await fetch("https://api.github.com/zen", { cache: "no-store" }); need(r.ok, "HTTP " + r.status); return "GitHub javobi: " + (await r.text()).slice(0, 60); }, "Internet bo'lmasa, o'tmaydi: bu normal.");
+add("web", "Canvas 2D", true, async () => { const c = document.createElement("canvas"); c.width = c.height = 10; const x = c.getContext("2d"); x.fillStyle = "#f00"; x.fillRect(0, 0, 10, 10); need(x.getImageData(5, 5, 1, 1).data[0] === 255, "piksel mos kelmadi"); return "chizish ishladi"; });
+add("web", "WebGL", true, async () => { need(document.createElement("canvas").getContext("webgl"), "WebGL mavjud emas"); return "WebGL kontekst olindi"; });
+add("web", "Web Audio", true, async () => { need(window.AudioContext || window.webkitAudioContext, "AudioContext yo'q"); return "AudioContext mavjud"; });
+add("web", "crypto.subtle (SHA-256)", true, async () => { const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("a")); need(h.byteLength === 32, "xesh uzunligi noto'g'ri"); return "xeshlash ishladi"; });
+add("web", "Service Worker qo'llab-quvvatlanishi", true, async () => { need("serviceWorker" in navigator, "qo'llab-quvvatlanmaydi"); return "navigator.serviceWorker mavjud"; });
+add("web", "Xavfsiz muhit (secure context)", true, async () => { need(window.isSecureContext, "xavfsiz muhit emas"); return "origin: " + location.origin; });
+add("web", "Kamera (getUserMedia video)", false, async () => { const s = await navigator.mediaDevices.getUserMedia({ video: true }); s.getTracks().forEach((t) => t.stop()); return "kamera ochildi"; }, "Kamera ulangan bo'lishi kerak.");
+add("web", "Mikrofon (getUserMedia audio)", false, async () => { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); return "mikrofon ochildi"; }, "Mikrofon ulangan bo'lishi kerak.");
+add("web", "Geolokatsiya", false, () => new Promise((res, rej) => navigator.geolocation.getCurrentPosition((p) => res("koordinata: " + p.coords.latitude.toFixed(2) + ", " + p.coords.longitude.toFixed(2)), (e) => rej(new Error(e.message)), { timeout: 8000 })));
+add("web", "Brauzer bildirishnomasi (Notification API)", false, async () => { need("Notification" in window, "API yo'q"); const p = await Notification.requestPermission(); need(p === "granted", "ruxsat: " + p); new Notification("API Test", { body: "Brauzer bildirishnomasi" }); return "ko'rsatildi"; });
+add("web", "Brauzer to'liq ekrani (requestFullscreen)", false, async () => { await document.documentElement.requestFullscreen(); await wait(800); await document.exitFullscreen(); return "kirdi va chiqdi"; });
+add("web", "window.open: tashqi havola", false, async () => { window.open("https://example.com", "_blank"); return "Havola TIZIM BRAUZERIDA ochilishi kerak (dastur ichida yangi oyna emas): ko'zda tekshiring"; });
+add("web", "window.open: file: havola bloklanadi", false, async () => { window.open("file:///C:/Windows/", "_blank"); return "Hech narsa ochilmasligi kerak (Explorer ham): ko'zda tekshiring"; });
+
+// ===================== B. FAYL SERVERI =====================
+group("srv", "B. Mini app fayl serveri");
+
+add("srv", "manifest.json to'g'ri turda beriladi", true, async () => { const r = await fetch("/manifest.json", { cache: "no-store" }); need(r.ok, "HTTP " + r.status); need((r.headers.get("content-type") || "").includes("json"), "Content-Type: " + r.headers.get("content-type")); const m = await r.json(); need(m.id === "com.test.apitest", "id mos kelmadi"); return "Content-Type: " + r.headers.get("content-type"); });
+add("srv", "SPA: noma'lum manzil index.html qaytaradi", true, async () => { const r = await fetch("/yoq-sahifa-" + Date.now(), { cache: "no-store" }); need(r.ok, "HTTP " + r.status); need((await r.text()).includes("API Test"), "index.html qaytmadi"); return "HTTP 200, index.html"; });
+add("srv", "Range so'rovi (video/audio uchun)", true, async () => { const r = await fetch("/index.html", { headers: { Range: "bytes=0-9" }, cache: "no-store" }); need(r.status === 206, "kutilgan 206, keldi " + r.status); need(r.headers.get("content-range"), "Content-Range yo'q"); need((await r.arrayBuffer()).byteLength === 10, "10 bayt kutilgan"); return "206, " + r.headers.get("content-range"); });
+add("srv", "Kesh o'chirilgan (no-store)", true, async () => { const r = await fetch("/manifest.json"); need((r.headers.get("cache-control") || "").includes("no-store"), "Cache-Control: " + r.headers.get("cache-control")); return "Cache-Control: no-store"; });
+add("srv", "Yo'l hujumi (path traversal) to'siladi", true, async () => {
+  for (const p of ["/..%2f..%2f..%2f..%2fWindows%2fwin.ini", "/%2e%2e/%2e%2e/%2e%2e/Windows/win.ini", "/..%5c..%5c..%5cWindows%5cwin.ini"]) {
+    const r = await fetch(p, { cache: "no-store" }); const t = r.ok ? await r.text() : "";
+    need(!/\[fonts\]|\[extensions\]|\[mci extensions\]/i.test(t), "TIZIM FAYLI OQIB CHIQDI: " + p);
+  }
+  return "3 ta hiyla ham tizim faylini bermadi";
+});
+
+// ===================== C. HOST API: ASOSIY =====================
+group("api", "C. Host API: har bir metod");
+
+add("api", "window.miniapp va yangi metodlar mavjud", true, async () => { need(window.miniapp, "window.miniapp yo'q"); for (const k of ["storage","system","notify","clipboard","files","shell","window","hasPermission"]) need(miniapp[k], "miniapp." + k + " yo'q: Rust kodi yangilanganmi?"); return "SDK to'liq yuklangan"; });
+add("api", "getMe", true, async () => { const r = await miniapp.call("getMe"); need(r.ok, JSON.stringify(r.error)); const m = r.result; need(m.mini_app_id === "com.test.apitest", "mini_app_id mos kelmadi: " + m.mini_app_id); need(m.api_version >= 2, "api_version >= 2 kutilgan: " + m.api_version); return "API v" + m.api_version + ", " + m.app_name + " " + m.app_version + "\nRuxsatlar: " + (m.permissions.join(", ") || "yo'q"); });
+add("api", "storage: set, get, keys, remove, clear", true, async () => {
+  await miniapp.storage.clear();
+  await miniapp.storage.set("a", { x: 1 }); const v = await miniapp.storage.get("a"); need(v && v.x === 1, "get noto'g'ri");
+  need((await miniapp.storage.keys()).includes("a"), "keys'da yo'q");
+  await miniapp.storage.remove("a"); need((await miniapp.storage.get("a")) === null, "remove ishlamadi");
+  await miniapp.storage.set("b", 1); await miniapp.storage.clear(); need((await miniapp.storage.keys()).length === 0, "clear ishlamadi"); return "hammasi ishladi";
+});
+add("api", "storage: yo'q kalit null qaytaradi", true, async () => { need((await miniapp.storage.get("yoq-kalit-" + Date.now())) === null, "null kutilgan"); return "null"; });
+add("api", "storage: Unicode va murakkab qiymat", true, async () => {
+  const v = { s: "oʻzbek 😀 Привет", n: [1, 2.5, null, true], o: { a: { b: "c" } } }; await miniapp.storage.set("u", v);
+  need(JSON.stringify(await miniapp.storage.get("u")) === JSON.stringify(v), "qiymat o'zgarib qoldi"); await miniapp.storage.clear(); return "qiymat aynan saqlandi";
+});
+add("api", "storage: 201 belgili kalit rad etiladi", true, async () => expectErr("storage.set", { key: "k".repeat(201), value: 1 }, "INVALID_KEY"));
+add("api", "storage: bo'sh kalit rad etiladi", true, async () => expectErr("storage.set", { key: "", value: 1 }, "INVALID_KEY"));
+add("api", "storage: 1 MB dan katta qiymat rad etiladi", true, async () => expectErr("storage.set", { key: "big", value: big(1100 * 1024) }, "PAYLOAD_TOO_LARGE", true));
+add("api", "storage: 5 MB chegarasi (STORAGE_FULL)", true, async () => {
+  await miniapp.storage.clear(); let code = null, n = 0;
+  try { for (; n < 8; n++) { const r = await miniapp.call("storage.set", { key: "k" + n, value: big(900 * 1024) }); if (!r.ok) { code = r.error.code; break; } } }
+  finally { await miniapp.storage.clear(); }
+  need(code === "STORAGE_FULL", "STORAGE_FULL kutilgan, keldi: " + code); return n + " ta 900 KB dan keyin STORAGE_FULL: to'g'ri";
+});
+add("api", "window.setTitle", true, async () => { await miniapp.window.setTitle("API Test (ishladi)"); return "Oyna sarlavhasi o'zgargan bo'lishi kerak: ko'zda tekshiring"; });
+add("api", "window.setTitle: bo'sh sarlavha rad etiladi", true, async () => expectErr("window.setTitle", { title: "  " }, "INVALID_PARAMS"));
+add("api", "window.setFullscreen: noto'g'ri qiymat rad etiladi", true, async () => expectErr("window.setFullscreen", { value: "ha" }, "INVALID_PARAMS"));
+add("api", "window.setFullscreen", false, async () => { await miniapp.window.setFullscreen(true); await wait(1200); await miniapp.window.setFullscreen(false); return "To'liq ekranga kirib chiqdi: ko'zda tekshiring"; });
+
+add("api", "system.info", true, async () => { await needPerm("system.info"); const i = await miniapp.system.info(); for (const k of ["os","arch","app_name","app_version","api_version"]) need(i[k] !== undefined, k + " yo'q"); return JSON.stringify(i); });
+
+add("api", "clipboard: yozish va o'qish", true, async () => { await needPerm("clipboard.write"); await needPerm("clipboard.read"); const s = "apitest-" + Date.now(); await miniapp.clipboard.write(s); need((await miniapp.clipboard.read()) === s, "o'qilgan matn mos kelmadi"); return "yozildi va o'qildi"; });
+add("api", "clipboard: Unicode", true, async () => { await needPerm("clipboard.write"); await needPerm("clipboard.read"); const s = "oʻzbek 😀 Привет"; await miniapp.clipboard.write(s); need((await miniapp.clipboard.read()) === s, "Unicode buzildi"); return "Unicode to'g'ri"; });
+add("api", "clipboard: 1 MB dan katta matn rad etiladi", true, async () => { await needPerm("clipboard.write"); return expectErr("clipboard.write", { text: big(1100 * 1024) }, "PAYLOAD_TOO_LARGE", true); });
+add("api", "clipboard.write: 'text' yo'q bo'lsa rad etiladi", true, async () => { await needPerm("clipboard.write"); return expectErr("clipboard.write", {}, "INVALID_PARAMS"); });
+
+add("api", "notify.show: 'title' yo'q bo'lsa rad etiladi", true, async () => { await needPerm("notifications"); return expectErr("notify.show", { body: "x" }, "INVALID_PARAMS"); });
+add("api", "notify.show", false, async () => { await needPerm("notifications"); await miniapp.notify.show({ title: "API Test", body: "Windows bildirishnomasi ishladi" }); return "Yuborildi: Windows bildirishnomasi chiqdimi? Ko'zda tekshiring"; });
+add("api", "notify.show: tezlik chegarasi", false, async () => {
+  await needPerm("notifications"); let code = null, sent = 0;
+  for (let i = 0; i < 14; i++) { const r = await miniapp.call("notify.show", { title: "Chegara " + (i + 1) }); if (r.ok) sent++; else { code = r.error.code; break; } }
+  need(code === "RATE_LIMITED", "RATE_LIMITED kutilgan, keldi: " + code); return sent + " ta yuborildi, keyin RATE_LIMITED: to'g'ri";
+}, "DIQQAT: ~10 ta bildirishnoma chiqadi. Daqiqada bir marta bajaring.");
+
+add("api", "shell.openUrl: xavfli havolalar rad etiladi", true, async () => {
+  await needPerm("links.open");
+  for (const u of ["ftp://example.com/a", "javascript:alert(1)", "file:///C:/Windows/System32/calc.exe", "data:text/html,x", "bu url emas"]) await expectErr("shell.openUrl", { url: u }, "INVALID_PARAMS");
+  return "5 ta xavfli/yaroqsiz havola rad etildi";
+});
+add("api", "shell.openUrl: 'url' yo'q bo'lsa rad etiladi", true, async () => { await needPerm("links.open"); return expectErr("shell.openUrl", {}, "INVALID_PARAMS"); });
+add("api", "shell.openUrl", false, async () => { await needPerm("links.open"); await miniapp.shell.openUrl("https://example.com"); return "Brauzerda example.com ochilishi kerak: ko'zda tekshiring"; });
+
+add("api", "files.open: noto'g'ri 'as' rad etiladi", true, async () => { await needPerm("files.read"); return expectErr("files.open", { as: "hex" }, "INVALID_PARAMS"); });
+add("api", "files.save: 'content' yo'q bo'lsa rad etiladi", true, async () => { await needPerm("files.write"); return expectErr("files.save", { suggestedName: "a.txt" }, "INVALID_PARAMS"); });
+add("api", "files.save: yaroqsiz base64 rad etiladi", true, async () => { await needPerm("files.write"); return expectErr("files.save", { suggestedName: "a.bin", content: "!!!bu base64 emas!!!", as: "base64" }, "INVALID_PARAMS"); });
+add("api", "files.save: 10 MB dan katta fayl rad etiladi", true, async () => { await needPerm("files.write"); return expectErr("files.save", { suggestedName: "katta.txt", content: big(11 * 1024 * 1024) }, "FILE_TOO_LARGE", true); });
+add("api", "files.save: 14 MB dan katta so'rov rad etiladi", true, async () => { await needPerm("files.write"); return expectErr("files.save", { suggestedName: "katta.txt", content: big(15 * 1024 * 1024) }, "PAYLOAD_TOO_LARGE", true); });
+add("api", "files.open: matn fayl", false, async () => { await needPerm("files.read"); const f = await miniapp.files.open({ extensions: ["txt", "json", "md"] }); if (f === null) return "bekor qilindi (bu xato emas)"; need(typeof f.content === "string", "content matn emas"); return "nom: " + f.name + ", hajm: " + f.size + " bayt"; }, "Kichik .txt faylni tanlang. Oynada faqat txt/json/md ko'rinishi kerak (filtr).");
+add("api", "files.open: base64 rejimi", false, async () => {
+  await needPerm("files.read"); const f = await miniapp.files.open({ as: "base64" }); if (f === null) return "bekor qilindi (bu xato emas)";
+  const bin = atob(f.content); need(bin.length === f.size, "base64 uzunligi hajmga mos emas: " + bin.length + " != " + f.size); return f.name + ": " + f.size + " bayt to'g'ri dekodlandi";
+}, "Istalgan kichik fayl (masalan rasm) tanlang.");
+add("api", "files.open: ikkilik fayl matn sifatida rad etiladi", false, async () => {
+  await needPerm("files.read"); const r = await miniapp.call("files.open", {}); if (r.ok && r.result === null) return "bekor qilindi: qayta urining";
+  need(!r.ok && r.error.code === "NOT_TEXT", "NOT_TEXT kutilgan, keldi: " + JSON.stringify(r.ok ? r.result && r.result.name : r.error)); return "NOT_TEXT qaytdi: to'g'ri";
+}, "Rasm yoki .exe kabi ikkilik fayl tanlang.");
+add("api", "files.open: 10 MB dan katta fayl rad etiladi", false, async () => {
+  await needPerm("files.read"); const r = await miniapp.call("files.open", { as: "base64" }); if (r.ok && r.result === null) return "bekor qilindi: qayta urining";
+  need(!r.ok && r.error.code === "FILE_TOO_LARGE", "FILE_TOO_LARGE kutilgan, keldi: " + JSON.stringify(r.ok ? "fayl o'qildi" : r.error)); return "FILE_TOO_LARGE qaytdi: to'g'ri";
+}, "10 MB dan katta fayl tanlang.");
+add("api", "files.save: matn", false, async () => { await needPerm("files.write"); const r = await miniapp.files.save({ suggestedName: "apitest.txt", content: "Salom, bu API Test fayli.\n" }); return r.saved ? "saqlandi: " + r.name : "bekor qilindi (bu xato emas)"; }, "Oynada nomni o'zgartirmay saqlang.");
+add("api", "files.save: base64 (1x1 rasm)", false, async () => { await needPerm("files.write"); const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=="; const r = await miniapp.files.save({ suggestedName: "nuqta.png", content: png, as: "base64" }); return r.saved ? "saqlandi: " + r.name + ". Faylni oching: rasm bo'lishi kerak" : "bekor qilindi (bu xato emas)"; });
+add("api", "files.save va qayta ochish (round-trip)", false, async () => {
+  await needPerm("files.write"); await needPerm("files.read"); const text = "round-trip " + Date.now() + "\noʻzbek 😀\n";
+  const s = await miniapp.files.save({ suggestedName: "roundtrip.txt", content: text }); if (!s.saved) return "bekor qilindi (bu xato emas)";
+  const f = await miniapp.files.open({ extensions: ["txt"] }); if (f === null) return "ochish bekor qilindi";
+  need(f.content === text, "mazmun mos kelmadi"); return "saqlangan va ochilgan mazmun bir xil";
+}, "Avval saqlang, keyin ochish oynasida AYNAN o'sha faylni tanlang.");
+add("api", "files.save: .exe rad etiladi", false, async () => {
+  await needPerm("files.write"); const r = await miniapp.call("files.save", { suggestedName: "test.exe", content: "x" });
+  if (r.ok && r.result.saved === false) return "bekor qilindi: qayta bajaring va nomni o'zgartirmay saqlang";
+  need(!r.ok && r.error.code === "BLOCKED_EXTENSION", "BLOCKED_EXTENSION kutilgan, keldi: " + JSON.stringify(r)); return "BLOCKED_EXTENSION qaytdi: to'g'ri";
+}, "Oynada nomni .exe qoldiring.");
+add("api", "files: bir vaqtda ikkita oyna (BUSY)", false, async () => {
+  await needPerm("files.read"); const first = miniapp.call("files.open", {}); await wait(500);
+  const second = await miniapp.call("files.open", {}); await first.catch(() => {});
+  need(!second.ok && second.error.code === "BUSY", "BUSY kutilgan, keldi: " + JSON.stringify(second)); return "ikkinchi oyna BUSY bilan rad etildi";
+}, "Birinchi ochilgan oynani yoping (Bekor qilish).");
+
+// ===================== D. XAVFSIZLIK VA RUXSATLAR =====================
+group("sec", "D. Xavfsizlik va ruxsatlar");
+
+add("sec", "Noto'g'ri token rad etiladi (401)", true, async () => { const r = await rawHost("getMe", { method: "POST", headers: { Authorization: "Bearer noto'g'ri-token", "Content-Type": "application/json" }, body: "{}" }); need(r.status === 401, "401 kutilgan, keldi " + r.status); return "401 UNAUTHORIZED"; });
+add("sec", "Tokensiz so'rov rad etiladi (401)", true, async () => { const r = await rawHost("getMe", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); need(r.status === 401, "401 kutilgan, keldi " + r.status); return "401 UNAUTHORIZED"; });
+add("sec", "POST bo'lmagan usul rad etiladi (405)", true, async () => { const r = await rawHost("getMe", { method: "GET", headers: { Authorization: "Bearer " + (miniapp.token || "x") } }); need(r.status === 405, "405 kutilgan, keldi " + r.status); return "405 METHOD_NOT_ALLOWED"; });
+add("sec", "Xavfli metod nomlari mavjud emas", true, async () => { for (const m of ["runCommand","shell.exec","fs.readFile","fs.writeFile","registry.get","files.delete","process.spawn"]) await expectErr(m, {}, "METHOD_NOT_FOUND"); return "7 ta xavfli nom: hammasi METHOD_NOT_FOUND"; });
+add("sec", "Yaroqsiz JSON rad etiladi", true, async () => { const r = await rawHost("storage.get", { method: "POST", headers: { Authorization: "Bearer " + (miniapp.token || "x"), "Content-Type": "application/json" }, body: "{bu json emas" }); need(r.status === 400, "400 kutilgan, keldi " + r.status); return "400 INVALID_JSON"; });
+
+const GATED = [
+  ["system.info", "system.info", {}], ["notifications", "notify.show", { title: "x" }], ["clipboard.write", "clipboard.write", { text: "x" }],
+  ["clipboard.read", "clipboard.read", {}], ["files.read", "files.open", {}], ["files.write", "files.save", { suggestedName: "a.txt", content: "x" }], ["links.open", "shell.openUrl", { url: "https://example.com" }],
+];
+for (const [perm, method, params] of GATED) {
+  add("sec", "Ruxsatsiz rejim: " + method + " (" + perm + ")", true, async () => {
+    if (await miniapp.hasPermission(perm)) skip("«" + perm + "» berilgan. Tekshirish uchun: «Mening ilovalarim», «Ruxsatlarni boshqarish», «Hammasini bekor qilish», so'ng testni qayta ishga tushiring");
+    return expectErr(method, params, "PERMISSION_DENIED");
+  });
+}
+
+// ===================== E. DASTURNI QO'LDA TEKSHIRISH RO'YXATI =====================
+group("man", "E. Dasturning o'zi: qo'lda tekshiruv ro'yxati", "Bularni mini app tekshira olmaydi. Dasturning asosiy oynasida bajarib, «Belgilash» tugmasini bosing (☐ → ✓ → ✗).");
+const CHECK = [
+  ["Kirish", ["«GitHub bilan kirish» qurilma kodini ko'rsatadi va brauzer ochiladi", "Kodni tasdiqlagach, dastur o'zi kirib ketadi", "Sarlavhada haqiqiy @login va avatar ko'rinadi", "«Kirmasdan ko'rish» do'konni ochadi", "Chiqish tugmasi kirish ekraniga qaytaradi", "Dasturni qayta ochganda kirgan holat saqlanadi"]],
+  ["Do'kon", ["Katalog yuklanadi (yoki aniq xato va «Qayta yuklash» chiqadi)", "Qidiruv ilovalarni filtrlaydi", "Toifa chiplari ishlaydi", "Kartochka bosilsa, batafsil sahifa ochiladi", "«Eng ommabop» bo'limi to'g'ri ko'rinadi"]],
+  ["O'rnatish va yangilash", ["Ilovani o'rnatish ishlaydi va «Mening ilovalarim»da paydo bo'ladi", "«Ochish» mini app oynasini ochadi", "Yangi versiya chiqarilganda «Yangilash» belgisi paydo bo'ladi", "«Yangilash» yangi versiyani o'rnatadi", "«O'chirish» ilovani va uning ma'lumotini o'chiradi", "Ruxsat so'rash oynasi birinchi ochilishda chiqadi", "«Ruxsatlarni boshqarish» ruxsatni bekor qiladi"]],
+  ["Nashr qilish", ["Ochiq repo'ni do'konga nashr qilish ishlaydi", "Yopiq repo uchun ochiq nusxa yaratiladi va oldindan ko'rish to'g'ri", "«Do'kondan olib tashlash» ishlaydi", "«Nusxani yangilash» yopiq repo uchun ishlaydi", "Repo nomi bo'yicha qo'lda o'rnatish ishlaydi"]],
+  ["Oyna va tashqi ko'rinish", ["Oyna kichraytirilganda dizayn buzilmaydi", "Kun/tun rejimi almashadi va eslab qolinadi", "Mini app oynasida tashqi havola tizim brauzerida ochiladi"]],
+  ["Ish stoli va fayllar", ["Ish stoliga yorliq yaratish ishlaydi", ".miniapp fayl ikki marta bosilganda mini app ochiladi", "Dastur ikkinchi marta ishga tushirilsa, mavjud oyna oldinga chiqadi (single-instance)"]],
+];
+const CK_KEY = "apitest-checklist";
+let ckState = {}; try { ckState = JSON.parse(localStorage.getItem(CK_KEY) || "{}"); } catch (e) {}
+for (const [, items] of CHECK) for (const it of items) { const t = { g: "man", name: it, auto: false, manual: true, status: ckState[it] || "wait", detail: "" }; T.push(t); }
+
+// ===================== Ko'rsatish =====================
+const ICON = { wait: "·", run: "…", ok: "✓", bad: "✗", skip: "–" };
+const $ = (id) => document.getElementById(id);
+function rowFor(t) {
+  const row = document.createElement("div"); row.className = "row s-" + (t.status === "wait" && !t.auto ? "man" : t.status);
+  const icon = document.createElement("div"); icon.className = "icon"; icon.textContent = t.status === "wait" && !t.auto ? "☐" : ICON[t.status];
+  const mid = document.createElement("div"); const name = document.createElement("div"); name.className = "name"; name.textContent = t.name;
+  if (!t.manual) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = t.auto ? "avtomatik" : "qo'lda"; name.appendChild(tag); }
+  mid.appendChild(name);
+  const d = t.detail || t.hint || ""; if (d) { const x = document.createElement("div"); x.className = "detail"; x.textContent = d; mid.appendChild(x); }
+  const act = document.createElement("div");
+  if (t.manual) { const b = document.createElement("button"); b.className = "small"; b.textContent = "Belgilash"; b.onclick = () => { t.status = t.status === "wait" ? "ok" : t.status === "ok" ? "bad" : "wait"; ckState[t.name] = t.status; try { localStorage.setItem(CK_KEY, JSON.stringify(ckState)); } catch (e) {} render(); }; act.appendChild(b); }
+  else if (!t.auto) { const b = document.createElement("button"); b.className = "small"; b.textContent = t.status === "wait" ? "Sinash" : "Qayta"; b.onclick = () => runOne(t); act.appendChild(b); }
+  row.append(icon, mid, act); return row;
+}
+function render() {
+  const only = $("onlyBad").checked, root = $("groups"); root.innerHTML = "";
+  for (const g of GROUPS) {
+    const list = T.filter((t) => t.g === g.id && (!only || t.status === "bad")); if (!list.length) continue;
+    const all = T.filter((t) => t.g === g.id), ok = all.filter((t) => t.status === "ok").length, bad = all.filter((t) => t.status === "bad").length;
+    const head = document.createElement("div"); head.className = "gh";
+    const h = document.createElement("h2"); h.textContent = g.title; head.appendChild(h);
+    const s = document.createElement("span"); s.className = "gs"; s.textContent = "✓ " + ok + "  ✗ " + bad + "  / " + all.length; head.appendChild(s);
+    if (all.some((t) => t.auto)) { const b = document.createElement("button"); b.className = "small"; b.textContent = "Shu bo'limni ishga tushirish"; b.onclick = () => runGroup(g.id); head.appendChild(b); }
+    root.appendChild(head);
+    if (g.hint) { const p = document.createElement("div"); p.className = "detail"; p.style.marginBottom = "6px"; p.textContent = g.hint; root.appendChild(p); }
+    const card = document.createElement("div"); card.className = "card"; root.appendChild(card);
+    list.forEach((t) => card.appendChild(rowFor(t)));
+  }
+  const c = (st) => T.filter((t) => t.status === st).length;
+  $("summary").textContent = "✓ " + c("ok") + "   ✗ " + c("bad") + "   – " + c("skip") + "   ☐ " + c("wait");
+}
+async function runOne(t) {
+  t.status = "run"; t.detail = ""; render();
+  try { t.detail = (await t.run()) || ""; t.status = "ok"; }
+  catch (e) { if (e instanceof Skip) { t.status = "skip"; t.detail = e.message; } else { t.status = "bad"; t.detail = (e && e.message) || String(e); } }
+  render();
+}
+async function runGroup(id) { for (const t of T.filter((x) => x.g === id && x.auto)) await runOne(t); }
+async function showPerms() {
+  try {
+    const names = ["system.info", "notifications", "clipboard.write", "clipboard.read", "files.read", "files.write", "links.open"], got = [], miss = [];
+    for (const n of names) (await miniapp.hasPermission(n) ? got : miss).push(n);
+    $("perm").innerHTML = "Berilgan ruxsatlar: <b>" + (got.join(", ") || "yo'q") + "</b>" + (miss.length ? " · Berilmagan: <b>" + miss.join(", ") + "</b>" : "");
+  } catch (e) { $("perm").textContent = "Ruxsatlarni o'qib bo'lmadi: " + e.message; }
+}
+$("runAuto").onclick = async (e) => { e.target.disabled = true; await showPerms(); for (const g of GROUPS) await runGroup(g.id); await showPerms(); e.target.disabled = false; };
+$("onlyBad").onchange = render;
+$("reset").onclick = () => { for (const t of T) { if (!t.manual) { t.status = "wait"; t.detail = ""; } } render(); };
+$("copy").onclick = async () => {
+  const L = ["API Test natijasi", navigator.userAgent, $("perm").textContent, $("summary").textContent];
+  for (const g of GROUPS) { L.push("", g.title); for (const t of T.filter((x) => x.g === g.id)) L.push((t.status === "ok" ? "[OK]    " : t.status === "bad" ? "[XATO]  " : t.status === "skip" ? "[SKIP]  " : "[ ]     ") + t.name + (t.detail ? "  ->  " + t.detail.replace(/\n/g, " | ") : "")); }
+  const text = L.join("\n");
+  try { await miniapp.clipboard.write(text); alert("Natija nusxalandi. Uni suhbatga qo'ying."); }
+  catch (e) { try { await navigator.clipboard.writeText(text); alert("Natija nusxalandi."); } catch (e2) { prompt("Quyidagi matnni qo'lda nusxalang:", text); } }
+};
+render(); showPerms();
+</script>
+</body>
+</html>
