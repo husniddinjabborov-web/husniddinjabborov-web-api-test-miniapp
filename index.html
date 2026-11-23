@@ -76,6 +76,8 @@ async function expectErr(method, params, code, tolerateReset) {
   need(r.error.code === code, "kutilgan " + code + ", keldi " + r.error.code + ": " + r.error.message);
   return code + " qaytdi: to'g'ri";
 }
+// Obyekt kalitlari tartibidan qat'i nazar solishtirish uchun (Rust JSON kalitlarni alifbo tartibida saqlaydi)
+const canon = (x) => JSON.stringify(x, (k, val) => val && typeof val === "object" && !Array.isArray(val) ? Object.fromEntries(Object.keys(val).sort().map((kk) => [kk, val[kk]])) : val);
 async function rawHost(path, opts) { return fetch("/__host/" + path, opts); }
 
 // ===================== A. VEB IMKONIYATLARI =====================
@@ -124,7 +126,7 @@ group("srv", "B. Mini app fayl serveri");
 
 add("srv", "manifest.json to'g'ri turda beriladi", true, async () => { const r = await fetch("/manifest.json", { cache: "no-store" }); need(r.ok, "HTTP " + r.status); need((r.headers.get("content-type") || "").includes("json"), "Content-Type: " + r.headers.get("content-type")); const m = await r.json(); need(m.id === "com.test.apitest", "id mos kelmadi"); return "Content-Type: " + r.headers.get("content-type"); });
 add("srv", "SPA: noma'lum manzil index.html qaytaradi", true, async () => { const r = await fetch("/yoq-sahifa-" + Date.now(), { cache: "no-store" }); need(r.ok, "HTTP " + r.status); need((await r.text()).includes("API Test"), "index.html qaytmadi"); return "HTTP 200, index.html"; });
-add("srv", "Range so'rovi (video/audio uchun)", true, async () => { const r = await fetch("/index.html", { headers: { Range: "bytes=0-9" }, cache: "no-store" }); need(r.status === 206, "kutilgan 206, keldi " + r.status); need(r.headers.get("content-range"), "Content-Range yo'q"); need((await r.arrayBuffer()).byteLength === 10, "10 bayt kutilgan"); return "206, " + r.headers.get("content-range"); });
+add("srv", "Range so'rovi (video/audio uchun; HTML dan tashqari fayllarda)", true, async () => { const r = await fetch("/manifest.json", { headers: { Range: "bytes=0-9" }, cache: "no-store" }); need(r.status === 206, "kutilgan 206, keldi " + r.status); need(r.headers.get("content-range"), "Content-Range yo'q"); need((await r.arrayBuffer()).byteLength === 10, "10 bayt kutilgan"); return "206, " + r.headers.get("content-range"); });
 add("srv", "Kesh o'chirilgan (no-store)", true, async () => { const r = await fetch("/manifest.json"); need((r.headers.get("cache-control") || "").includes("no-store"), "Cache-Control: " + r.headers.get("cache-control")); return "Cache-Control: no-store"; });
 add("srv", "Yo'l hujumi (path traversal) to'siladi", true, async () => {
   for (const p of ["/..%2f..%2f..%2f..%2fWindows%2fwin.ini", "/%2e%2e/%2e%2e/%2e%2e/Windows/win.ini", "/..%5c..%5c..%5cWindows%5cwin.ini"]) {
@@ -149,7 +151,7 @@ add("api", "storage: set, get, keys, remove, clear", true, async () => {
 add("api", "storage: yo'q kalit null qaytaradi", true, async () => { need((await miniapp.storage.get("yoq-kalit-" + Date.now())) === null, "null kutilgan"); return "null"; });
 add("api", "storage: Unicode va murakkab qiymat", true, async () => {
   const v = { s: "oʻzbek 😀 Привет", n: [1, 2.5, null, true], o: { a: { b: "c" } } }; await miniapp.storage.set("u", v);
-  need(JSON.stringify(await miniapp.storage.get("u")) === JSON.stringify(v), "qiymat o'zgarib qoldi"); await miniapp.storage.clear(); return "qiymat aynan saqlandi";
+  need(canon(await miniapp.storage.get("u")) === canon(v), "qiymat o'zgarib qoldi: " + canon(await miniapp.storage.get("u"))); await miniapp.storage.clear(); return "qiymat aynan saqlandi";
 });
 add("api", "storage: 201 belgili kalit rad etiladi", true, async () => expectErr("storage.set", { key: "k".repeat(201), value: 1 }, "INVALID_KEY"));
 add("api", "storage: bo'sh kalit rad etiladi", true, async () => expectErr("storage.set", { key: "", value: 1 }, "INVALID_KEY"));
